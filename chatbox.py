@@ -1,6 +1,5 @@
 import streamlit as st
 from openai import OpenAI
-import openai
 import re
 
 # 1. CẤU HÌNH API
@@ -36,55 +35,50 @@ def smart_display(text):
     if keyword_match:
         keyword = keyword_match.group(1)
         img_url = f"https://image.pollinations.ai/prompt/{keyword}_buddhism_zen?width=800&height=500&nologo=true"
-        st.image(img_url, caption=f"Hình ảnh thanh tịnh")
+        st.image(img_url, caption="Hình ảnh thanh tịnh")
 
-st.title("🪷 A Di Đà Phật - Trợ Lý Học Tu")
-st.caption(f"Trạng thái thư viện: OpenAI v{openai.__version__}")
+st.markdown("<h1 style='text-align: center;'>🪷 A Di Đà Phật</h1>", unsafe_allow_html=True)
 
-# SIDEBAR
+# 2. SIDEBAR - THỈNH KINH SÁCH
 with st.sidebar:
-    st.header("☸️ Thỉnh Kinh Sách")
-    uploaded_file = st.file_uploader("Tải lên Kinh sách (PDF/Docx)", type=['pdf', 'txt', 'docx'])
+    st.header("☸️ Kinh Sách")
+    uploaded_file = st.file_uploader("Tải tài liệu (PDF/Docx/Txt)", type=['pdf', 'txt', 'docx'])
     
     if uploaded_file and st.session_state["assistant_id"] is None:
-        with st.spinner("Đang thỉnh tri thức vào AI..."):
+        with st.spinner("Đang thỉnh tri thức..."):
             try:
-                # 1. Tải file lên OpenAI (Lệnh này bản cũ hay mới đều giống nhau)
+                # BƯỚC 1: Tải file lên
                 file_obj = client.files.create(file=uploaded_file, purpose='assistants')
                 
-                # 2. KIỂM TRA PHIÊN BẢN ĐỂ DÙNG LỆNH PHÙ HỢP
-                if hasattr(client.beta, 'vector_stores'):
-                    # CÁCH MỚI (Dành cho OpenAI >= 1.21.0)
-                    v_store = client.beta.vector_stores.create(name="TempleStore", file_ids=[file_obj.id])
-                    assist = client.beta.assistants.create(
-                        name="Sư Thầy AI",
-                        instructions="Bạn là trợ lý Chùa. Trả lời dựa trên file. Cuối câu ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
-                        tools=[{"type": "file_search"}],
-                        tool_resources={"file_search": {"vector_store_ids": [v_store.id]}},
-                        model="gpt-4o"
-                    )
-                else:
-                    # CÁCH CŨ (Dành cho OpenAI bản cũ hơn)
-                    # Dùng công cụ 'retrieval' và truyền trực tiếp file_ids
-                    assist = client.beta.assistants.create(
-                        name="Sư Thầy AI",
-                        instructions="Bạn là trợ lý Chùa. Trả lời dựa trên file. Cuối câu ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
-                        tools=[{"type": "retrieval"}],
-                        file_ids=[file_obj.id],
-                        model="gpt-4-turbo-preview" # Model cũ ổn định hơn với lệnh cũ
-                    )
+                # BƯỚC 2: Tạo Vector Store và gán file (Dùng cú pháp v2 chuẩn)
+                vector_store = client.beta.vector_stores.create(name="TempleData")
+                client.beta.vector_stores.files.create_and_poll(
+                    vector_store_id=vector_store.id, 
+                    file_id=file_obj.id
+                )
                 
+                # BƯỚC 3: Tạo Assistant (TUYỆT ĐỐI KHÔNG DÙNG file_ids Ở ĐÂY)
+                assist = client.beta.assistants.create(
+                    name="Sư Thầy AI",
+                    instructions="Bạn là trợ lý Chùa. Trả lời dựa trên file. Cuối câu luôn ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
+                    model="gpt-4o",
+                    tools=[{"type": "file_search"}],
+                    tool_resources={
+                        "file_search": {
+                            "vector_store_ids": [vector_store.id]
+                        }
+                    }
+                )
                 st.session_state["assistant_id"] = assist.id
-                st.success("A Di Đà Phật, Kinh sách đã nạp xong!")
-                
+                st.success("Kinh sách đã nạp xong!")
             except Exception as e:
-                st.error(f"Lỗi khi nạp file: {e}")
+                st.error(f"Lỗi hệ thống: {e}")
 
-    if st.button("Làm mới tâm thức"):
+    if st.button("Xóa lịch sử"):
         st.session_state["messages"] = []
         st.rerun()
 
-# HIỂN THỊ CHAT
+# 3. CHAT
 for m in st.session_state["messages"]:
     with st.chat_message(m["role"], avatar="🙏" if m["role"]=="user" else "🪷"):
         if m["role"] == "user":
@@ -99,17 +93,14 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
 
     if st.session_state["assistant_id"]:
         with st.chat_message("assistant", avatar="🪷"):
-            with st.spinner("Đang suy ngẫm..."):
-                try:
-                    thread = client.beta.threads.create(messages=[{"role": "user", "content": prompt}])
-                    run = client.beta.threads.runs.create_and_poll(
-                        thread_id=thread.id, assistant_id=st.session_state["assistant_id"]
-                    )
-                    if run.status == 'completed':
-                        messages = client.beta.threads.messages.list(thread_id=thread.id)
-                        ans = messages.data[0].content[0].text.value
-                        st.session_state["messages"].append({"role": "assistant", "content": ans})
-                        smart_display(ans)
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Lỗi khi trò chuyện: {e}")
+            with st.spinner("Đang quán chiếu..."):
+                thread = client.beta.threads.create(messages=[{"role": "user", "content": prompt}])
+                run = client.beta.threads.runs.create_and_poll(
+                    thread_id=thread.id, assistant_id=st.session_state["assistant_id"]
+                )
+                if run.status == 'completed':
+                    msgs = client.beta.threads.messages.list(thread_id=thread.id)
+                    ans = msgs.data[0].content[0].text.value
+                    st.session_state["messages"].append({"role": "assistant", "content": ans})
+                    smart_display(ans)
+                    st.rerun()
