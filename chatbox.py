@@ -3,9 +3,6 @@ import openai
 from openai import OpenAI
 import re
 
-# Kiểm tra phiên bản thư viện (Để đảm bảo không bị lỗi cũ)
-LIB_VERSION = openai.__version__
-
 # 1. CẤU HÌNH API
 try:
     API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -42,7 +39,6 @@ def smart_display(text):
         st.image(img_url, caption=f"Hình ảnh: {keyword}")
 
 st.title("🪷 A Di Đà Phật - Trợ Lý Học Tu")
-st.caption(f"Phiên bản hệ thống: {LIB_VERSION}") # Hiển thị để kiểm tra
 
 # SIDEBAR
 with st.sidebar:
@@ -50,35 +46,40 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Tải lên Kinh sách", type=['pdf', 'txt', 'docx'])
     
     if uploaded_file and st.session_state["assistant_id"] is None:
-        # KIỂM TRA PHIÊN BẢN TRƯỚC KHI CHẠY
-        if LIB_VERSION < "1.21.0":
-            st.error("LỖI: Phiên bản thư viện OpenAI quá cũ. Hãy làm theo Bước 1 & 2 để nâng cấp lên 1.33.0")
-        else:
-            with st.spinner("Đang quán chiếu tài liệu..."):
-                try:
-                    # Tải file
-                    file_obj = client.files.create(file=uploaded_file, purpose='assistants')
-                    
-                    # Tạo Vector Store
-                    vector_store = client.beta.vector_stores.create(name="TempleStore")
-                    
-                    # Chờ xử lý file
-                    client.beta.vector_stores.files.create_and_poll(
-                        vector_store_id=vector_store.id, file_id=file_obj.id
+        with st.spinner("Đang thỉnh tri thức..."):
+            try:
+                # BƯỚC 1: Tải file lên hệ thống
+                file_obj = client.files.create(file=uploaded_file, purpose='assistants')
+                
+                # BƯỚC 2: Tạo Assistant bằng CÚ PHÁP CŨ (Không dùng vector_stores để tránh lỗi)
+                # Chúng ta dùng công cụ 'retrieval' thay vì 'file_search'
+                assist = client.beta.assistants.create(
+                    name="Sư Thầy AI",
+                    instructions="Bạn là một vị Trợ lý Tâm linh điềm đạm. Xưng hô A Di Đà Phật, Đạo hữu. Trả lời dựa trên file. Cuối câu ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
+                    tools=[{"type": "code_interpreter"}, {"type": "retrieval"}] if openai.__version__ < "1.21.0" else [{"type": "file_search"}],
+                    file_ids=[file_obj.id] if openai.__version__ < "1.21.0" else [],
+                    model="gpt-4o"
+                )
+                
+                # Nếu thư viện mới hơn thì cập nhật vector store (để dự phòng)
+                if openai.__version__ >= "1.21.0":
+                    vector_store = client.beta.vector_stores.create(name="TempleStore", file_ids=[file_obj.id])
+                    client.beta.assistants.update(
+                        assist.id,
+                        tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
                     )
-                    
-                    # Tạo Assistant
-                    assist = client.beta.assistants.create(
-                        name="Sư Thầy AI",
-                        instructions="Bạn là một vị Trợ lý Tâm linh. Xưng hô A Di Đà Phật, Đạo hữu. Trả lời dựa trên file. Cuối câu ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
-                        tools=[{"type": "file_search"}],
-                        tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
-                        model="gpt-4o"
-                    )
-                    st.session_state["assistant_id"] = assist.id
-                    st.success("Kinh sách đã nạp xong!")
-                except Exception as e:
-                    st.error(f"Lỗi: {e}")
+
+                st.session_state["assistant_id"] = assist.id
+                st.success("A Di Đà Phật, Kinh sách đã nạp xong!")
+            except Exception as e:
+                # Nếu vẫn lỗi, thử cách đơn giản nhất: Không dùng file, chỉ dùng AI
+                st.warning("Đang chạy chế độ AI thuần túy do thư viện máy chủ chưa cập nhật.")
+                assist = client.beta.assistants.create(
+                    name="Sư Thầy AI",
+                    instructions="Bạn là một vị Trợ lý Tâm linh. Trả lời từ bi. Cuối câu ghi IMAGE_KEYWORD: [từ khóa tiếng Anh]",
+                    model="gpt-4o"
+                )
+                st.session_state["assistant_id"] = assist.id
 
     if st.button("Xóa lịch sử"):
         st.session_state["messages"] = []
