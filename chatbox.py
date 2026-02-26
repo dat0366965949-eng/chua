@@ -122,7 +122,7 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
                 st.session_state["messages"].append({"role": "assistant", "content": ans})
                 smart_display(ans)
 
-            except Exception:
-                except Exception as e:
+            except Exception as e:
+                
                 st.error("A Di Đà Phật, đã có lỗi kỹ thuật. Dưới đây là chi tiết lỗi:")
                 st.exception(e)  # in nguyên lỗi ra
