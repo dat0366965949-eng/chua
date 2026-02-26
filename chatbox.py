@@ -1,12 +1,11 @@
 import streamlit as st
 from openai import OpenAI
-import openai
 import re
 
-# 1. CẤU HÌNH API
+# 1) API KEY
 try:
     API_KEY = st.secrets["OPENAI_API_KEY"]
-except:
+except Exception:
     API_KEY = "SỬ_DỤNG_KEY_CỦA_BẠN_TẠI_ĐÂY"
 
 client = OpenAI(api_key=API_KEY)
@@ -25,93 +24,72 @@ st.markdown("""
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
-if "assistant_id" not in st.session_state:
-    st.session_state["assistant_id"] = None
+if "vector_store_id" not in st.session_state:
+    st.session_state["vector_store_id"] = None
 
-# Hàm hiển thị thông minh (Văn bản sạch + Ảnh thanh tịnh)
-def smart_display(text):
+# Hiển thị thông minh
+def smart_display(text: str):
     clean_text = re.sub(r'【.*?】', '', text)
-    keyword_match = re.search(r'IMAGE_KEYWORD:\s*([\w_]+)', clean_text)
-    final_text = clean_text.split("IMAGE_KEYWORD:")[0]
+    keyword_match = re.search(r'IMAGE_KEYWORD:\s*([A-Za-z0-9_\- ]+)', clean_text)
+    final_text = clean_text.split("IMAGE_KEYWORD:")[0].strip()
     st.markdown(final_text)
+
     if keyword_match:
-        keyword = keyword_match.group(1)
+        keyword = keyword_match.group(1).strip().replace(" ", "_")
         img_url = f"https://image.pollinations.ai/prompt/{keyword}_buddhism_zen_peace?width=800&height=500&nologo=true"
         st.image(img_url, caption="Hình ảnh thanh tịnh")
 
+SYSTEM_INSTRUCTIONS = """
+Bạn là một vị Trợ lý Tâm linh tại Chùa, am hiểu sâu sắc về Phật pháp.
+
+NHIỆM VỤ:
+1) ƯU TIÊN KINH SÁCH: Nếu có tài liệu được tải lên, hãy tìm câu trả lời trong đó trước.
+   Bắt đầu bằng: [Theo Kinh sách của Chùa]:
+2) NẾU KHÔNG CÓ/ KHÔNG THẤY TRONG TÀI LIỆU: trả lời theo tri thức Phật học phổ quát.
+   Bắt đầu bằng: [Theo tri thức Phật học]:
+3) PHONG CÁCH: Điềm đạm, từ bi. Xưng hô: A Di Đà Phật, Đạo hữu, Phật tử.
+4) ẢNH: Luôn kết thúc bằng: IMAGE_KEYWORD: <từ khóa tiếng Anh>
+YÊU CẦU: Trả lời rõ ràng, gợi ý thực hành (quán niệm/giới-định-tuệ) ngắn gọn nếu phù hợp.
+"""
+
 st.markdown("<h1 style='text-align: center;'>🪷 A Di Đà Phật</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center;'>Trợ Lý Phật Pháp: Kinh Sách & Tri Thức Internet</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Trợ Lý Phật Pháp: Kinh Sách & Tri Thức</p>", unsafe_allow_html=True)
 
-# 2. HÀM TẠO ASSISTANT (Tự động thích nghi)
-def get_temple_assistant(file_id=None):
-    instruction_prompt = """
-    Bạn là một vị Trợ lý Tâm linh tại Chùa, am hiểu sâu sắc về Phật pháp.
-    NHIỆM VỤ:
-    1. ƯU TIÊN KINH SÁCH: Nếu có tài liệu được tải lên, hãy tìm câu trả lời trong đó trước. Bắt đầu bằng "[Theo Kinh sách của Chùa]:".
-    2. CHẾ ĐỘ GOOGLE/INTERNET: Nếu trong tài liệu không có thông tin, hãy dùng kiến thức rộng lớn của bạn (tri thức Phật học thế giới) để trả lời. Bắt đầu bằng "[Theo tri thức Phật học]:".
-    3. PHONG CÁCH: Điềm đạm, từ bi. Xưng hô: A Di Đà Phật, Đạo hữu, Phật tử.
-    4. ẢNH: Luôn kết thúc bằng 'IMAGE_KEYWORD: [từ khóa tiếng Anh]' để minh họa.
-    """
-    
-    # Kiểm tra tính năng mới/cũ của OpenAI trên máy chủ
-    try:
-        if file_id and hasattr(client.beta, 'vector_stores'):
-            # Cách mới (V2)
-            v_store = client.beta.vector_stores.create(name="TempleData", file_ids=[file_id])
-            return client.beta.assistants.create(
-                name="Sư Thầy AI",
-                instructions=instruction_prompt,
-                model="gpt-4o",
-                tools=[{"type": "file_search"}],
-                tool_resources={"file_search": {"vector_store_ids": [v_store.id]}}
-            )
-        elif file_id:
-            # Cách cũ (V1)
-            return client.beta.assistants.create(
-                name="Sư Thầy AI",
-                instructions=instruction_prompt,
-                model="gpt-4-turbo-preview",
-                tools=[{"type": "retrieval"}],
-                file_ids=[file_id]
-            )
-        else:
-            # Chế độ AI thuần túy (Không có file)
-            return client.beta.assistants.create(
-                name="Sư Thầy AI",
-                instructions=instruction_prompt,
-                model="gpt-4o"
-            )
-    except:
-        # Fallback cuối cùng nếu mọi cách đều lỗi
-        return None
-
-# 3. SIDEBAR - QUẢN LÝ
+# 2) SIDEBAR: upload -> file -> vector store
 with st.sidebar:
     st.header("☸️ Thỉnh Kinh Sách")
-    uploaded_file = st.file_uploader("Tải lên tài liệu của Chùa", type=['pdf', 'txt', 'docx'])
-    
-    if uploaded_file and st.session_state["assistant_id"] is None:
-        with st.spinner("Đang thỉnh tri thức vào AI..."):
-            file_obj = client.files.create(file=uploaded_file, purpose='assistants')
-            st.session_state["assistant_id"] = get_temple_assistant(file_obj.id).id
-            st.success("Kinh sách đã nạp xong!")
+    uploaded_file = st.file_uploader("Tải lên tài liệu của Chùa", type=["pdf", "txt", "docx"])
+
+    if uploaded_file:
+        with st.spinner("Đang thỉnh tri thức vào Chùa (tạo kho tra cứu)..."):
+            # upload file
+            file_obj = client.files.create(file=uploaded_file, purpose="assistants")
+
+            # create vector store
+            vstore = client.vector_stores.create(name="TempleData")
+            st.session_state["vector_store_id"] = vstore.id
+
+            # attach file to vector store
+            client.vector_stores.files.create(
+                vector_store_id=vstore.id,
+                file_id=file_obj.id
+            )
+
+            st.success("Kinh sách đã nạp xong! Có thể hỏi đáp theo tài liệu.")
 
     if st.button("Xóa lịch sử hội thoại"):
         st.session_state["messages"] = []
         st.rerun()
 
-# 4. CHAT LOGIC
-if st.session_state["assistant_id"] is None:
-    # Nếu chưa có file, tạo Assistant mặc định để vẫn chat được
-    st.session_state["assistant_id"] = get_temple_assistant().id
-
+# 3) Render chat history
 for m in st.session_state["messages"]:
-    with st.chat_message(m["role"], avatar="🙏" if m["role"]=="user" else "🪷"):
+    with st.chat_message(m["role"], avatar="🙏" if m["role"] == "user" else "🪷"):
         if m["role"] == "user":
             st.markdown(m["content"])
         else:
             smart_display(m["content"])
 
+# 4) Ask
 if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
     st.session_state["messages"].append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="🙏"):
@@ -120,16 +98,29 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
     with st.chat_message("assistant", avatar="🪷"):
         with st.spinner("Đang quán chiếu tri thức..."):
             try:
-                thread = client.beta.threads.create(messages=[{"role": "user", "content": prompt}])
-                run = client.beta.threads.runs.create_and_poll(
-                    thread_id=thread.id, 
-                    assistant_id=st.session_state["assistant_id"]
+                # Nếu có vector store => bật file_search
+                tools = []
+                tool_resources = None
+
+                if st.session_state["vector_store_id"]:
+                    tools = [{"type": "file_search"}]
+                    tool_resources = {
+                        "file_search": {"vector_store_ids": [st.session_state["vector_store_id"]]}
+                    }
+
+                resp = client.responses.create(
+                    model="gpt-4o-mini",
+                    input=[
+                        {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+                        *st.session_state["messages"],  # gồm cả prompt mới
+                    ],
+                    tools=tools,
+                    tool_resources=tool_resources,
                 )
-                if run.status == 'completed':
-                    msgs = client.beta.threads.messages.list(thread_id=thread.id)
-                    ans = msgs.data[0].content[0].text.value
-                    st.session_state["messages"].append({"role": "assistant", "content": ans})
-                    smart_display(ans)
-                    st.rerun()
-            except Exception as e:
+
+                ans = resp.output_text
+                st.session_state["messages"].append({"role": "assistant", "content": ans})
+                smart_display(ans)
+
+            except Exception:
                 st.error("A Di Đà Phật, máy chủ đang bận, xin đạo hữu thử lại sau giây lát.")
