@@ -11,7 +11,8 @@ except Exception:
     API_KEY = "DAN_KEY_CUA_BAN_VAO_DAY"
 
 client = OpenAI(api_key=API_KEY)
-
+import openai
+st.write("OpenAI version:", openai.__version__)
 st.set_page_config(page_title="A Di Đà Phật - Trợ Lý Học Tu", layout="centered")
 
 # ==============================
