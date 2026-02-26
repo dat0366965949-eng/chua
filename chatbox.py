@@ -123,4 +123,6 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
                 smart_display(ans)
 
             except Exception:
-                st.error("A Di Đà Phật, máy chủ đang bận, xin đạo hữu thử lại sau giây lát.")
+                except Exception as e:
+                st.error("A Di Đà Phật, đã có lỗi kỹ thuật. Dưới đây là chi tiết lỗi:")
+                st.exception(e)  # in nguyên lỗi ra
