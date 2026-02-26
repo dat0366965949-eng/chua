@@ -31,13 +31,10 @@ h1, h2, h3, p, span { color: #5D4037 !important; font-family: serif; }
 # ==============================
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
-
 if "assistant_id" not in st.session_state:
     st.session_state["assistant_id"] = None
-
 if "thread_id" not in st.session_state:
     st.session_state["thread_id"] = None
-
 if "vector_store_id" not in st.session_state:
     st.session_state["vector_store_id"] = None
 
@@ -72,7 +69,7 @@ def ensure_assistant():
     if st.session_state["assistant_id"]:
         return st.session_state["assistant_id"]
 
-    tools = [{"type": "file_search"}]  # luôn bật, có file thì gắn vector store vào
+    tools = [{"type": "file_search"}]
     tool_resources = None
     if st.session_state["vector_store_id"]:
         tool_resources = {"file_search": {"vector_store_ids": [st.session_state["vector_store_id"]]}}
@@ -84,7 +81,6 @@ def ensure_assistant():
         tools=tools,
         tool_resources=tool_resources,
     )
-
     st.session_state["assistant_id"] = assistant.id
     return assistant.id
 
@@ -97,7 +93,7 @@ def ensure_thread():
     return thread.id
 
 def update_assistant_tool_resources():
-    """Nếu user upload file sau khi assistant đã tạo, cập nhật assistant để dùng vector store."""
+    """Nếu upload file sau khi assistant đã tạo, cập nhật assistant để dùng vector store."""
     if not st.session_state["assistant_id"]:
         return
     if not st.session_state["vector_store_id"]:
@@ -127,12 +123,12 @@ with st.sidebar:
             # Upload file
             file_obj = client.files.create(file=uploaded_file, purpose="assistants")
 
-            # Create vector store
-            vstore = client.beta.vector_stores.create(name="TempleData")
+            # ✅ SỬA Ở ĐÂY: vector_stores KHÔNG NẰM TRONG client.beta
+            vstore = client.vector_stores.create(name="TempleData")
             st.session_state["vector_store_id"] = vstore.id
 
             # Add file & poll until indexed
-            client.beta.vector_stores.file_batches.create_and_poll(
+            client.vector_stores.file_batches.create_and_poll(
                 vector_store_id=vstore.id,
                 file_ids=[file_obj.id],
             )
@@ -145,6 +141,7 @@ with st.sidebar:
     if st.button("Xóa lịch sử hội thoại"):
         st.session_state["messages"] = []
         st.session_state["thread_id"] = None
+        st.session_state["assistant_id"] = None
         st.rerun()
 
 # ==============================
@@ -162,6 +159,7 @@ for m in st.session_state["messages"]:
 # ==============================
 if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
     st.session_state["messages"].append({"role": "user", "content": prompt})
+
     with st.chat_message("user", avatar="🙏"):
         st.markdown(prompt)
 
@@ -171,14 +169,12 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
                 assistant_id = ensure_assistant()
                 thread_id = ensure_thread()
 
-                # add message to thread
                 client.beta.threads.messages.create(
                     thread_id=thread_id,
                     role="user",
                     content=prompt
                 )
 
-                # run + poll
                 run = client.beta.threads.runs.create_and_poll(
                     thread_id=thread_id,
                     assistant_id=assistant_id
@@ -187,8 +183,8 @@ if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
                 if run.status != "completed":
                     st.error(f"Run chưa hoàn tất. Trạng thái: {run.status}")
                 else:
-                    msgs = client.beta.threads.messages.list(thread_id=thread_id, limit=10)
-                    # lấy message assistant mới nhất
+                    msgs = client.beta.threads.messages.list(thread_id=thread_id, limit=20)
+
                     ans = None
                     for item in msgs.data:
                         if item.role == "assistant":
