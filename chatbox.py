@@ -3,7 +3,7 @@ from openai import OpenAI
 import re
 
 # ==============================
-# 1) API KEY
+# 1) API
 # ==============================
 try:
     API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -11,12 +11,11 @@ except Exception:
     API_KEY = "DAN_KEY_CUA_BAN_VAO_DAY"
 
 client = OpenAI(api_key=API_KEY)
-import openai
-st.write("OpenAI version:", openai.__version__)
+
 st.set_page_config(page_title="A Di Đà Phật - Trợ Lý Học Tu", layout="centered")
 
 # ==============================
-# 2) CSS
+# 2) UI
 # ==============================
 st.markdown("""
 <style>
@@ -32,11 +31,18 @@ h1, h2, h3, p, span { color: #5D4037 !important; font-family: serif; }
 # ==============================
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
+
+if "assistant_id" not in st.session_state:
+    st.session_state["assistant_id"] = None
+
+if "thread_id" not in st.session_state:
+    st.session_state["thread_id"] = None
+
 if "vector_store_id" not in st.session_state:
     st.session_state["vector_store_id"] = None
 
 # ==============================
-# 4) SMART DISPLAY
+# 4) DISPLAY
 # ==============================
 def smart_display(text: str):
     clean_text = re.sub(r'【.*?】', '', text)
@@ -57,42 +63,92 @@ NHIỆM VỤ:
    Bắt đầu bằng: [Theo Kinh sách của Chùa]:
 2) NẾU KHÔNG THẤY TRONG TÀI LIỆU: trả lời theo tri thức Phật học phổ quát.
    Bắt đầu bằng: [Theo tri thức Phật học]:
-3) PHONG CÁCH: Điềm đạm, từ bi. Xưng hô: A Di Đà Phật, Đạo hữu.
-4) ẢNH: Luôn kết thúc bằng: IMAGE_KEYWORD: <từ khóa tiếng Anh>
+3) PHONG CÁCH: Điềm đạm, từ bi. Xưng hô: A Di Đà Phật, Đạo hữu, Phật tử.
+4) ẢNH: Luôn kết thúc bằng 'IMAGE_KEYWORD: <từ khóa tiếng Anh>'.
 """
 
+def ensure_assistant():
+    """Tạo assistant 1 lần, tái sử dụng."""
+    if st.session_state["assistant_id"]:
+        return st.session_state["assistant_id"]
+
+    tools = [{"type": "file_search"}]  # luôn bật, có file thì gắn vector store vào
+    tool_resources = None
+    if st.session_state["vector_store_id"]:
+        tool_resources = {"file_search": {"vector_store_ids": [st.session_state["vector_store_id"]]}}
+
+    assistant = client.beta.assistants.create(
+        name="Sư Thầy AI",
+        instructions=SYSTEM_PROMPT,
+        model="gpt-4o-mini",
+        tools=tools,
+        tool_resources=tool_resources,
+    )
+
+    st.session_state["assistant_id"] = assistant.id
+    return assistant.id
+
+def ensure_thread():
+    """Tạo thread 1 lần để giữ hội thoại."""
+    if st.session_state["thread_id"]:
+        return st.session_state["thread_id"]
+    thread = client.beta.threads.create()
+    st.session_state["thread_id"] = thread.id
+    return thread.id
+
+def update_assistant_tool_resources():
+    """Nếu user upload file sau khi assistant đã tạo, cập nhật assistant để dùng vector store."""
+    if not st.session_state["assistant_id"]:
+        return
+    if not st.session_state["vector_store_id"]:
+        return
+
+    client.beta.assistants.update(
+        assistant_id=st.session_state["assistant_id"],
+        tool_resources={"file_search": {"vector_store_ids": [st.session_state["vector_store_id"]]}}
+    )
+
+# ==============================
+# 5) HEADER
+# ==============================
 st.markdown("<h1 style='text-align:center;'>🪷 A Di Đà Phật</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center;'>Trợ Lý Phật Pháp: Kinh Sách & Tri Thức</p>", unsafe_allow_html=True)
 
 # ==============================
-# 5) SIDEBAR UPLOAD -> VECTOR STORE
+# 6) SIDEBAR UPLOAD
 # ==============================
 with st.sidebar:
     st.header("☸️ Thỉnh Kinh Sách")
+
     uploaded_file = st.file_uploader("Tải lên tài liệu của Chùa", type=["pdf", "txt", "docx"])
 
     if uploaded_file:
         with st.spinner("Đang thỉnh tri thức vào Chùa..."):
-            # Upload file (purpose assistants dùng được cho file_search)
+            # Upload file
             file_obj = client.files.create(file=uploaded_file, purpose="assistants")
 
-            # Create vector store + poll index xong
-            vstore = client.vector_stores.create(name="TempleData")
+            # Create vector store
+            vstore = client.beta.vector_stores.create(name="TempleData")
             st.session_state["vector_store_id"] = vstore.id
 
-            client.vector_stores.file_batches.create_and_poll(
+            # Add file & poll until indexed
+            client.beta.vector_stores.file_batches.create_and_poll(
                 vector_store_id=vstore.id,
                 file_ids=[file_obj.id],
             )
+
+            # nếu assistant đã tồn tại thì update để dùng kho mới
+            update_assistant_tool_resources()
 
             st.success("Kinh sách đã nạp xong!")
 
     if st.button("Xóa lịch sử hội thoại"):
         st.session_state["messages"] = []
+        st.session_state["thread_id"] = None
         st.rerun()
 
 # ==============================
-# 6) SHOW HISTORY
+# 7) SHOW HISTORY
 # ==============================
 for m in st.session_state["messages"]:
     with st.chat_message(m["role"], avatar="🙏" if m["role"] == "user" else "🪷"):
@@ -102,43 +158,48 @@ for m in st.session_state["messages"]:
             smart_display(m["content"])
 
 # ==============================
-# 7) CHAT
+# 8) CHAT
 # ==============================
 if prompt := st.chat_input("Bạch Thầy, con có điều chưa rõ..."):
     st.session_state["messages"].append({"role": "user", "content": prompt})
-
     with st.chat_message("user", avatar="🙏"):
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar="🪷"):
         with st.spinner("Đang quán chiếu tri thức..."):
             try:
-                tools = []
-                tool_resources = None
+                assistant_id = ensure_assistant()
+                thread_id = ensure_thread()
 
-                if st.session_state["vector_store_id"]:
-                    tools = [{"type": "file_search"}]
-                    tool_resources = {
-                        "file_search": {"vector_store_ids": [st.session_state["vector_store_id"]]}
-                    }
-
-                resp = client.responses.create(
-                    model="gpt-4o-mini",
-                    input=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        *st.session_state["messages"],
-                    ],
-                    tools=tools,
-                    tool_resources=tool_resources,   # <-- CHỈ CÓ SAU KHI UPDATE openai
+                # add message to thread
+                client.beta.threads.messages.create(
+                    thread_id=thread_id,
+                    role="user",
+                    content=prompt
                 )
 
-                answer = resp.output_text
-                st.session_state["messages"].append({"role": "assistant", "content": answer})
-                smart_display(answer)
+                # run + poll
+                run = client.beta.threads.runs.create_and_poll(
+                    thread_id=thread_id,
+                    assistant_id=assistant_id
+                )
 
-            except TypeError as e:
-                st.error("Bạn đang dùng thư viện openai quá cũ nên không có tool_resources. Hãy chạy: pip install -U openai")
-                st.exception(e)
+                if run.status != "completed":
+                    st.error(f"Run chưa hoàn tất. Trạng thái: {run.status}")
+                else:
+                    msgs = client.beta.threads.messages.list(thread_id=thread_id, limit=10)
+                    # lấy message assistant mới nhất
+                    ans = None
+                    for item in msgs.data:
+                        if item.role == "assistant":
+                            ans = item.content[0].text.value
+                            break
+
+                    if not ans:
+                        ans = "A Di Đà Phật, hiện con chưa nhận được câu trả lời. Xin thử lại."
+
+                    st.session_state["messages"].append({"role": "assistant", "content": ans})
+                    smart_display(ans)
 
             except Exception as e:
                 st.error("Đã xảy ra lỗi kỹ thuật:")
