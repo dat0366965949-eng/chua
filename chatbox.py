@@ -12,7 +12,7 @@ except Exception:
 
 client = OpenAI(api_key=API_KEY)
 
-st.set_page_config(page_title="A Di Đà Phật - Trợ Lý Học Tu", layout="centered")
+st.set_page_config(page_title="Pháp Môn Tâm Linh", layout="centered")
 
 # ==============================
 # 2) UI
